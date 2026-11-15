@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0f1115" />
+<title>抖音无水印下载</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#171a21; --card2:#1f232c; --line:#2a2f3a;
+    --text:#e8eaed; --muted:#9aa3b2; --accent:#ff2d55; --ok:#2ecc71;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  body{padding:16px 14px calc(28px + env(safe-area-inset-bottom));max-width:680px;margin:0 auto}
+  h1{font-size:20px;margin:6px 0 2px;font-weight:700;letter-spacing:.5px}
+  .sub{color:var(--muted);font-size:12.5px;margin-bottom:16px}
+  textarea{width:100%;min-height:96px;resize:vertical;background:var(--card);
+    color:var(--text);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:14px;outline:none}
+  textarea:focus{border-color:#3b4250}
+  .row{display:flex;gap:10px;margin-top:10px}
+  button{border:0;border-radius:12px;padding:12px 16px;font-size:15px;font-weight:600;
+    color:#fff;background:var(--card2);cursor:pointer;transition:.15s}
+  button:active{transform:scale(.98)}
+  button.primary{background:var(--accent);flex:1}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  button.ghost{background:var(--card2);color:var(--text);flex:0 0 auto}
+  .status{margin-top:12px;color:var(--muted);font-size:13px;min-height:18px}
+  .status.err{color:#ff6b81}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:14px;margin-top:14px;overflow:hidden}
+  .title{font-size:15px;font-weight:600;margin:0 0 6px;word-break:break-word}
+  .meta{color:var(--muted);font-size:12.5px;margin-bottom:10px}
+  video{width:100%;border-radius:12px;background:#000;display:block;max-height:62vh}
+  .cover{width:100%;border-radius:12px;display:block;object-fit:cover;max-height:300px;background:#000}
+  .btns{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .btns button{flex:1;min-width:130px;background:var(--card2)}
+  .btns button.primary{background:var(--accent);flex:1}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}
+  .grid .cell{position:relative;border-radius:10px;overflow:hidden;background:#000}
+  .grid img{width:100%;display:block;aspect-ratio:3/4;object-fit:cover}
+  .grid .no{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.55);
+    color:#fff;font-size:11px;padding:1px 6px;border-radius:99px}
+  .bar{height:4px;background:var(--card2);border-radius:99px;overflow:hidden;margin-top:8px;display:none}
+  .bar>i{display:block;height:100%;width:0;background:var(--accent);transition:width .12s linear}
+  .bar.on{display:block}
+  .hint{color:var(--muted);font-size:12px;margin-top:8px}
+  footer{margin-top:28px;text-align:center;color:#6b7382;font-size:12px;line-height:1.8}
+  footer a{color:#8a93a5;text-decoration:none}
+  .badge{display:inline-block;font-size:11px;color:#ffd166;border:1px solid #4a3d1f;
+    background:#241f12;border-radius:99px;padding:1px 8px;margin-left:6px;vertical-align:2px}
+</style>
+</head>
+<body>
+  <h1>抖音无水印下载 <span class="badge">1080p</span></h1>
+  <div class="sub">粘贴分享口令 → 解析 → 预览 → 下载</div>
+
+  <textarea id="input" placeholder="粘贴抖音分享口令，例如：7.43 复制打开抖音，看看【xxx】 https://v.douyin.com/xxxxx/"></textarea>
+  <div class="row">
+    <button class="primary" id="go">解析</button>
+    <button class="ghost" id="clear">清空</button>
+  </div>
+  <div class="status" id="status"></div>
+  <div id="result"></div>
+
+  <footer>
+    仅供个人学习使用，请勿用于商业用途 · 版权归原作者所有<br />
+    解析服务部署于 Vercel，国内访问可能需要代理
+  </footer>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const input = $('#input'), statusEl = $('#status'), resultEl = $('#result');
+const goBtn = $('#go');
+
+const fmt = (n) => {
+  if (!n || n <= 0) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(2) + ' MB';
+};
+const proxy = (url) => '/api/proxy?url=' + encodeURIComponent(url);
+const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function setStatus(text, isErr) {
+  statusEl.textContent = text || '';
+  statusEl.className = 'status' + (isErr ? ' err' : '');
+}
+
+// 带进度下载：流式读取 → blob → a[download]
+async function download(url, filename, barEl, labelEl) {
+  const bar = barEl ? barEl.querySelector('i') : null;
+  try {
+    if (barEl) barEl.classList.add('on');
+    const res = await fetch(proxy(url));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const total = Number(res.headers.get('content-length') || 0);
+    const reader = res.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      if (bar) bar.style.width = total ? Math.min(100, loaded / total * 100) + '%' : '60%';
+      if (labelEl) labelEl.textContent = total
+        ? `${fmt(loaded)} / ${fmt(total)}`
+        : fmt(loaded);
+    }
+    if (bar) bar.style.width = '100%';
+    const blob = new Blob(chunks, { type: 'application/octet-stream' });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href; a.download = filename; document.body.appendChild(a); a.click();
+    a.remove(); setTimeout(() => URL.revokeObjectURL(href), 8000);
+    if (labelEl) labelEl.textContent = '已保存 ' + fmt(blob.size);
+    return blob.size;
+  } catch (e) {
+    if (labelEl) labelEl.textContent = '下载失败：' + e.message;
+    throw e;
+  }
+}
+
+function safeName(s, fallback) {
+  const base = (s || fallback || 'douyin').slice(0, 40).replace(/[\\/:*?"<>|\s]+/g, '_');
+  return base || 'douyin';
+}
+
+function render(data) {
+  resultEl.innerHTML = '';
+  const title = data.title || '（无标题）';
+  const author = data.author || '';
+  const size = fmt((data.extra && data.extra.size_bytes) || 0);
+
+  if (data.videos && data.videos.length) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const src = proxy(data.videos[0]);
+    card.innerHTML = `
+      <div class="title">${esc(title)}</div>
+      <div class="meta">@${esc(author)}${size ? ' · ' + size : ''}${
+        data.extra && data.extra.ratio ? ' · ' + data.extra.ratio : ''
+      }</div>
+      <video controls playsinline preload="metadata" poster="${data.cover ? proxy(data.cover) : ''}" src="${src}"></video>
+      <div class="btns">
+        <button class="primary" id="dlVideo">下载视频${size ? '（' + size + '）' : ''}</button>
+      </div>
+      <div class="bar" id="barV"><i></i></div>
+      <div class="hint" id="lbV"></div>`;
+    resultEl.appendChild(card);
+
+    card.querySelector('#dlVideo').addEventListener('click', (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      download(data.videos[0], safeName(title) + '.mp4', card.querySelector('#barV'), card.querySelector('#lbV'))
+        .catch(() => {})
+        .finally(() => { btn.disabled = false; });
+    });
+  }
+
+  if (data.images && data.images.length) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="title">${esc(title)}</div>
+      <div class="meta">@${esc(author)} · 图集 ${data.images.length} 张</div>
+      <div class="grid">${data.images.map((u, i) =>
+        `<div class="cell"><img loading="lazy" src="${proxy(u)}" alt="图 ${i + 1}"><span class="no">${i + 1}</span></div>`
+      ).join('')}</div>
+      <div class="btns"><button class="primary" id="dlAll">全部下载</button></div>
+      <div class="bar" id="barI"><i></i></div>
+      <div class="hint" id="lbI"></div>`;
+    resultEl.appendChild(card);
+
+    card.querySelector('#dlAll').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      const label = card.querySelector('#lbI');
+      let ok = 0;
+      for (let i = 0; i < data.images.length; i++) {
+        label.textContent = `正在下载 ${i + 1}/${data.images.length}`;
+        try {
+          await download(data.images[i], `${safeName(title)}_${i + 1}.jpg`, card.querySelector('#barI'), null);
+          ok++;
+        } catch {}
+      }
+      label.textContent = `完成 ${ok}/${data.images.length}`;
+      btn.disabled = false;
+    });
+  }
+
+  if (data.music && data.music.length && data.music[0].url) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const m = data.music[0];
+    card.innerHTML = `
+      <div class="title">背景音乐</div>
+      <div class="meta">${esc(m.title || '原声')}${m.author ? ' · ' + esc(m.author) : ''}</div>
+      <div class="btns"><button class="primary" id="dlMusic">下载音频</button></div>
+      <div class="bar" id="barM"><i></i></div>
+      <div class="hint" id="lbM"></div>`;
+    resultEl.appendChild(card);
+    card.querySelector('#dlMusic').addEventListener('click', (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      download(m.url, safeName(title) + '.mp3', card.querySelector('#barM'), card.querySelector('#lbM'))
+        .catch(() => {})
+        .finally(() => { btn.disabled = false; });
+    });
+  }
+
+  if (!resultEl.children.length) {
+    setStatus('没有解析到可下载的内容', true);
+  }
+}
+
+async function doParse() {
+  const text = input.value.trim();
+  if (!text) { setStatus('请先粘贴分享口令', true); return; }
+  goBtn.disabled = true;
+  resultEl.innerHTML = '';
+  setStatus('解析中…');
+  try {
+    const res = await fetch('/api/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) throw new Error(json.error || ('HTTP ' + res.status));
+    setStatus('解析成功');
+    render(json.data);
+  } catch (e) {
+    setStatus('解析失败：' + e.message, true);
+  } finally {
+    goBtn.disabled = false;
+  }
+}
+
+goBtn.addEventListener('click', doParse);
+$('#clear').addEventListener('click', () => { input.value = ''; resultEl.innerHTML = ''; setStatus(''); });
+input.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doParse();
+});
+</script>
+</body>
+</html>

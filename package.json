@@ -1,0 +1,13 @@
+{
+  "name": "douyin-nowm",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "抖音分享链接 → 无水印直链（Vercel Serverless + Edge）",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vercel dev"
+  }
+}
